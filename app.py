@@ -1,97 +1,60 @@
 import streamlit as st
 import requests
-import pandas as pd
-from datetime import datetime
 from bs4 import BeautifulSoup
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import pandas as pd
+import datetime
+import re
 
-# ------------------ CONFIG ------------------
+def google_search_scrape(query, days_limit=10, max_results=30):
+    headers = {"User-Agent": "Mozilla/5.0"}
+    search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}&num={max_results}"
+    response = requests.get(search_url, headers=headers)
+    soup = BeautifulSoup(response.text, 'html.parser')
 
-GOOGLE_API_KEY = "YOUR_GOOGLE_API_KEY"
-SEARCH_ENGINE_ID = "YOUR_SEARCH_ENGINE_ID"
-SEARCH_TERMS = [
-    "medical device engineer",
-    "medtech software engineer",
-    "healthtech embedded engineer",
-    "medical AI developer"
-]
-BLACKLIST = ["sales", "marketing", "hr", "recruiter", "business development", "bd"]
+    results = []
+    for g in soup.find_all('div', class_='tF2Cxc'):
+        title = g.find('h3')
+        link = g.find('a')['href'] if g.find('a') else ''
+        snippet = g.find('div', class_='VwiC3b')
+        snippet_text = snippet.get_text() if snippet else ''
 
-# Google Sheets config
-SHEET_NAME = "For Lead Gen Med Tech"
-WORKSHEET_NAME = "Engineering Job Leads"
-CREDENTIAL_FILE = "credentials.json"
-
-# ------------------ GOOGLE SHEET ------------------
-
-@st.cache_resource
-def connect_to_sheet():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIAL_FILE, scope)
-    client = gspread.authorize(creds)
-    sheet = client.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
-    return sheet
-
-def export_to_sheet(data):
-    sheet = connect_to_sheet()
-    rows = data[["Timestamp", "Company", "Title", "Location", "Link", "Source"]].values.tolist()
-    existing = len(sheet.get_all_values())
-    sheet.insert_rows(rows, row=existing + 1)
-    st.success(f"✅ Exported {len(rows)} rows to Google Sheet!")
-
-# ------------------ GOOGLE SEARCH ------------------
-
-def search_google(query, api_key, cx):
-    url = f"https://www.googleapis.com/customsearch/v1?q={query}&key={api_key}&cx={cx}"
-    response = requests.get(url)
-    if response.status_code == 200:
-        items = response.json().get("items", [])
-        results = []
-        for item in items:
-            title = item.get("title", "N/A")
-            link = item.get("link", "")
-            snippet = item.get("snippet", "").lower()
-
-            # Filter: Skip blacklisted words
-            if any(word in title.lower() for word in BLACKLIST):
+        # Extract date (if mentioned in snippet)
+        date_match = re.search(r'(\d+\s+days? ago)', snippet_text)
+        if date_match:
+            days_ago = int(date_match.group(1).split()[0])
+            if days_ago > days_limit:
                 continue
+        elif "hour ago" not in snippet_text and "minute ago" not in snippet_text:
+            continue
 
-            # Filter: Skip if looks older than ~30 days
-            if any(word in snippet for word in ["1 month", "2 months", "30 days"]):
-                continue
-
+        # Basic filtering
+        if any(x in snippet_text.lower() for x in ["hiring", "engineer", "developer", "medical"]):
             results.append({
-                "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "Company": "Unknown",
-                "Title": title,
-                "Location": "N/A",
+                "Title": title.get_text() if title else 'N/A',
                 "Link": link,
-                "Source": "Google Search API"
+                "Snippet": snippet_text
             })
-        return results
-    else:
-        st.error(f"🔴 Google Search API Error: {response.status_code}")
-        return []
 
-# ------------------ STREAMLIT UI ------------------
+    return results
 
-st.title("🔍 MedTech Job Lead Finder (via Google)")
-st.caption("Fetches engineering job listings from LinkedIn using Google Programmable Search API.")
+# Streamlit UI
+st.title("🔍 Live Job Scraper: HealthTech & MedTech Engineering Roles")
+st.write("Fetches recent engineering jobs from companies in Medical Equipment, HealthTech, and MedTech sectors.")
 
-if st.button("🚀 Search Now"):
-    all_jobs = []
-    for term in SEARCH_TERMS:
-        query = f"{term} site:linkedin.com/jobs"
-        st.info(f"Searching for: {term}")
-        leads = search_google(query, GOOGLE_API_KEY, SEARCH_ENGINE_ID)
-        all_jobs.extend(leads)
+query_input = st.text_input("🔎 Enter your job search query:",
+                            "site:linkedin.com/in OR site:linkedin.com/jobs (hiring engineer) (medtech OR healthtech)")
+days = st.slider("🗓️ Show posts from last X days:", 1, 30, 10)
+search_btn = st.button("🚀 Fetch Jobs")
 
-    if all_jobs:
-        df = pd.DataFrame(all_jobs)
-        st.dataframe(df, use_container_width=True)
+if search_btn:
+    with st.spinner("Scraping job posts from Google Search..."):
+        scraped_results = google_search_scrape(query_input, days_limit=days)
+        if scraped_results:
+            df = pd.DataFrame(scraped_results)
+            st.success(f"✅ Found {len(df)} job-related posts")
+            st.dataframe(df)
 
-        if st.button("📤 Export to Google Sheet"):
-            export_to_sheet(df)
-    else:
-        st.warning("❌ No recent job posts found.")
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button("⬇️ Download CSV", csv, "job_posts.csv", "text/csv")
+        else:
+            st.warning("No relevant results found. Try adjusting your query or timeframe.")
