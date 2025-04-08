@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import re
 
-def bing_search_scrape(query, max_results=50):
+def job_board_search_scrape(query, max_results=50):
     headers = {"User-Agent": "Mozilla/5.0"}
     search_url = f"https://www.bing.com/search?q={query.replace(' ', '+')}&count={max_results}"
     response = requests.get(search_url, headers=headers)
@@ -30,17 +30,17 @@ def bing_search_scrape(query, max_results=50):
     return results
 
 # Streamlit UI
-st.title("🔍 Live Job Scraper: HealthTech & MedTech Engineering Roles")
-st.write("Fetches recent engineering jobs from companies in Medical Equipment, HealthTech, and MedTech sectors using Bing Search.")
+st.title("🔍 Live Job Scraper: MedTech & HealthTech Engineering Roles")
+st.write("Fetches recent engineering jobs from job boards and public company websites (excluding LinkedIn).")
 
-# Pre-filled query (user doesn't need to enter)
-query_input = "site:linkedin.com/in OR site:linkedin.com/jobs (hiring engineer) (medtech OR healthtech OR \"medical devices\")"
+# Pre-filled job board search query
+query_input = "(hiring engineer) (medtech OR healthtech OR \"medical devices\") site:angel.co OR site:wellfound.com OR site:indeed.com OR site:glassdoor.com"
 
 search_btn = st.button("🚀 Fetch Jobs Now")
 
 if search_btn:
-    with st.spinner("Scraping job posts from Bing Search..."):
-        scraped_results = bing_search_scrape(query_input)
+    with st.spinner("Scraping job posts from Bing Search (public job boards)..."):
+        scraped_results = job_board_search_scrape(query_input)
         if scraped_results:
             df = pd.DataFrame(scraped_results)
             st.success(f"✅ Found {len(df)} job-related posts")
